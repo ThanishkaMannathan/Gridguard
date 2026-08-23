@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg-deep text-ink-primary font-body antialiased;
+  background-image:
+    radial-gradient(circle at 15% 0%, rgba(47,217,210,0.06), transparent 40%),
+    radial-gradient(circle at 85% 20%, rgba(139,124,246,0.05), transparent 45%);
+}
+
+::selection {
+  background: rgba(47,217,210,0.25);
+}
+
+/* thin scrollbars to match the console aesthetic */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #233049 transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #233049;
+  border-radius: 4px;
+}
+
+.eyebrow {
+  @apply text-[11px] tracking-[0.18em] uppercase text-ink-faint font-mono;
+}
+
+.data-value {
+  @apply font-mono tabular-nums;
+}
+
+.panel {
+  @apply bg-bg-panel border border-border rounded-lg shadow-panel;
+}
+
+.btn-primary {
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-md bg-signal-cyan text-bg-deep font-semibold text-sm
+    hover:brightness-110 active:brightness-95 transition disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+.btn-secondary {
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-ink-primary text-sm font-medium
+    hover:bg-bg-hover transition disabled:opacity-40 disabled:cursor-not-allowed;
+}
