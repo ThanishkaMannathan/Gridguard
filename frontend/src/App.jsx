@@ -88,8 +88,7 @@ export default function App() {
     setReportLoading(true);
     setReportError(null);
     api
-      .getReport(selectedId)
-      .then(setReport)
+      .downloadReportPdf(selectedId, diagnosis)
       .catch((e) => setReportError(e.message))
       .finally(() => setReportLoading(false));
   };

@@ -44,7 +44,7 @@ def embed_texts(texts, input_type="passage"):
     return [d.embedding for d in resp.data]
 
 
-def chat_complete(messages, temperature=0.2, max_tokens=900):
+def chat_complete(messages, temperature=0.2, max_tokens=350):
     """
     Call the NVIDIA-hosted Llama 3.1 70B instruct model for generation.
     `messages` follows the standard OpenAI chat format:

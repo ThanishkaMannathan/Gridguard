@@ -13,6 +13,15 @@ Endpoints:
 import os
 import io
 import json
+import textwrap
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import cm
+from reportlab.lib import colors
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_LEFT
 from datetime import datetime, timezone
 
 import joblib
@@ -183,47 +192,171 @@ def classify_record(record_id):
     })
 
 
+SAFETY_DISCLAIMER = (
+    "\n\n---\n**Safety Notice:** This output is decision support only. "
+    "It does not replace utility protection engineering review or established safety procedures."
+)
+
+
 def build_diagnosis_prompt(row, pred_label, probabilities, retrieved_chunks):
     context = "\n\n---\n\n".join(
         f"[Source: {c['source']}]\n{c['text']}" for c in retrieved_chunks
     )
     record_summary = (
         f"Record ID: {row['record_id']}\n"
-        f"Classified fault type: {FAULT_TYPE_LABELS.get(pred_label, pred_label)} ({pred_label}), "
-        f"classifier confidence {probabilities.get(pred_label, 0) * 100:.1f}%\n"
-        f"Phase voltages (RMS V): A={row['Va_rms']}, B={row['Vb_rms']}, C={row['Vc_rms']}\n"
-        f"Phase currents (RMS A): A={row['Ia_rms']}, B={row['Ib_rms']}, C={row['Ic_rms']}\n"
-        f"System frequency: {row['frequency_hz']} Hz\n"
-        f"Voltage unbalance: {row['voltage_unbalance_pct']}%  |  "
-        f"Current unbalance: {row['current_unbalance_pct']}%\n"
-        f"Zero-sequence voltage: {row['zero_seq_voltage']}  |  "
-        f"Zero-sequence current: {row['zero_seq_current']}\n"
-        f"Fault duration: {row.get('duration_ms', 'N/A')} ms  |  "
-        f"Estimated fault location: {row.get('fault_location_pct', 'N/A')}% of line length"
+        f"Fault type: {FAULT_TYPE_LABELS.get(pred_label, pred_label)} ({pred_label}), "
+        f"confidence {probabilities.get(pred_label, 0) * 100:.1f}%\n"
+        f"Voltages (V): A={row['Va_rms']} B={row['Vb_rms']} C={row['Vc_rms']}\n"
+        f"Currents (A): A={row['Ia_rms']} B={row['Ib_rms']} C={row['Ic_rms']}\n"
+        f"Freq: {row['frequency_hz']} Hz | V-unbal: {row['voltage_unbalance_pct']}% | "
+        f"I-unbal: {row['current_unbalance_pct']}%"
     )
     system_prompt = (
-        "You are GridGuard, an AI assistant for power system protection engineers. "
-        "You diagnose electrical faults and recommend corrective actions, grounded strictly "
-        "in the provided protection guideline excerpts. Be precise, use correct power-system "
-        "terminology, and always include a safety caveat that recommendations are decision "
-        "support only and do not replace utility protection engineering review and standard "
-        "safety procedures. If the guideline excerpts don't cover something, say so rather "
-        "than inventing settings or standards."
+        "You are GridGuard, a power-system protection AI. "
+        "Answer using only the provided guideline excerpts. Be concise and technical."
     )
     user_prompt = (
-        f"FAULT RECORD DATA:\n{record_summary}\n\n"
-        f"RELEVANT PROTECTION GUIDELINE EXCERPTS:\n{context}\n\n"
-        "Using only the record data and the guideline excerpts above, provide:\n"
-        "1. **Diagnosis** -- a concise interpretation of what this fault signature indicates.\n"
-        "2. **Likely Cause** -- the most probable physical cause(s) consistent with the guidelines.\n"
-        "3. **Recommended Corrective Actions** -- specific, prioritized steps referencing the "
-        "guideline where relevant.\n"
-        "4. **Reclose / Restoration Guidance** -- whether automatic reclosing should be blocked "
-        "and what should happen before restoration.\n"
-        "5. **Safety Note** -- a brief safety caveat.\n"
-        "Keep the whole response under 350 words and use the section headers above."
+        f"FAULT RECORD:\n{record_summary}\n\n"
+        f"GUIDELINE EXCERPTS:\n{context}\n\n"
+        "Reply in EXACTLY this format (under 150 words total):\n"
+        "**Diagnosis:** <one sentence>\n"
+        "**Likely Cause:** <one sentence>\n"
+        "**Corrective Actions:**\n- <action 1>\n- <action 2>\n- <action 3 if needed>\n"
+        "**Reclose Guidance:** <one sentence>"
     )
     return system_prompt, user_prompt
+
+
+# ---------------------------------------------------------------------------
+# PDF report renderer
+# ---------------------------------------------------------------------------
+
+def render_report_pdf(report_data):
+    """Build a formatted PDF from report_data dict and return bytes."""
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=2 * cm, rightMargin=2 * cm,
+        topMargin=2 * cm, bottomMargin=2 * cm,
+    )
+    styles = getSampleStyleSheet()
+    # Custom styles
+    title_style = ParagraphStyle(
+        "GGTitle", parent=styles["Title"],
+        fontSize=18, spaceAfter=6, textColor=colors.HexColor("#1e3a5f")
+    )
+    h2_style = ParagraphStyle(
+        "GGH2", parent=styles["Heading2"],
+        fontSize=12, spaceBefore=12, spaceAfter=4,
+        textColor=colors.HexColor("#1e3a5f")
+    )
+    body_style = ParagraphStyle(
+        "GGBody", parent=styles["Normal"],
+        fontSize=9, leading=13, spaceAfter=4
+    )
+    meta_style = ParagraphStyle(
+        "GGMeta", parent=styles["Normal"],
+        fontSize=8, textColor=colors.HexColor("#555555"), spaceAfter=2
+    )
+    warn_style = ParagraphStyle(
+        "GGWarn", parent=styles["Normal"],
+        fontSize=8, textColor=colors.HexColor("#7a5200"),
+        backColor=colors.HexColor("#fff8e1"), leading=12,
+        leftIndent=6, rightIndent=6, borderPad=4
+    )
+
+    row = report_data["row"]
+    pred_label = report_data["pred_label"]
+    probabilities = report_data["probabilities"]
+    diagnosis_text = report_data.get("diagnosis_text")
+    sources = report_data.get("sources", [])
+    generated_at = report_data["generated_at"]
+    record_id = report_data["record_id"]
+
+    story = []
+    story.append(Paragraph("GridGuard Fault Report", title_style))
+    story.append(Paragraph(f"Record ID: <font name='Courier'>{record_id}</font>", meta_style))
+    story.append(Paragraph(f"Generated: {generated_at}", meta_style))
+    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#ccddee"), spaceAfter=8))
+
+    # Classification
+    story.append(Paragraph("Classification", h2_style))
+    fault_label = FAULT_TYPE_LABELS.get(pred_label, pred_label)
+    conf = probabilities.get(pred_label, 0) * 100
+    story.append(Paragraph(f"<b>Predicted fault type:</b> {fault_label} ({pred_label})", body_style))
+    story.append(Paragraph(f"<b>Classifier confidence:</b> {conf:.1f}%", body_style))
+    story.append(Paragraph(f"<b>Ground-truth label (dataset):</b> {row['fault_type']}", body_style))
+
+    # Measured Quantities table
+    story.append(Paragraph("Measured Quantities", h2_style))
+    tbl_data = [
+        ["Quantity", "Phase A", "Phase B", "Phase C"],
+        ["RMS Voltage (V)", str(row["Va_rms"]), str(row["Vb_rms"]), str(row["Vc_rms"])],
+        ["RMS Current (A)", str(row["Ia_rms"]), str(row["Ib_rms"]), str(row["Ic_rms"])],
+    ]
+    tbl = Table(tbl_data, colWidths=[4.5 * cm, 3.5 * cm, 3.5 * cm, 3.5 * cm])
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1e3a5f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f4f8fc"), colors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#ccddee")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(tbl)
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        f"<b>Frequency:</b> {row['frequency_hz']} Hz &nbsp;&nbsp; "
+        f"<b>Voltage unbalance:</b> {row['voltage_unbalance_pct']}% &nbsp;&nbsp; "
+        f"<b>Current unbalance:</b> {row['current_unbalance_pct']}%",
+        body_style
+    ))
+    story.append(Paragraph(
+        f"<b>Fault duration:</b> {row.get('duration_ms', 'N/A')} ms &nbsp;&nbsp; "
+        f"<b>Fault location:</b> {row.get('fault_location_pct', 'N/A')}% of line length",
+        body_style
+    ))
+
+    # AI Diagnosis
+    story.append(Paragraph("AI Diagnosis &amp; Recommendations", h2_style))
+    if diagnosis_text:
+        # Render each line, converting markdown bold (**x**) to <b>x</b>
+        import re
+        full_text = diagnosis_text + SAFETY_DISCLAIMER
+        for line in full_text.split("\n"):
+            line = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", line)
+            if line.startswith("- "):
+                line = "&bull; " + line[2:]
+            if line.strip():
+                story.append(Paragraph(line, body_style))
+    else:
+        story.append(Paragraph(
+            "<i>AI diagnosis unavailable (NVIDIA_API_KEY not configured or RAG index not built).</i>",
+            body_style
+        ))
+
+    # Sources
+    if sources:
+        story.append(Paragraph("Sources Referenced", h2_style))
+        for s in sources:
+            story.append(Paragraph(f"&bull; {s}", body_style))
+
+    # Footer disclaimer
+    story.append(Spacer(1, 12))
+    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#ccddee"), spaceAfter=6))
+    story.append(Paragraph(
+        "This report was generated by GridGuard and is intended as decision support only. "
+        "It does not replace utility protection engineering review or established safety procedures.",
+        warn_style
+    ))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf
 
 
 @app.route("/api/diagnose/<record_id>", methods=["POST"])
@@ -240,7 +373,7 @@ def diagnose_record(record_id):
         f"{row['current_unbalance_pct']}%, frequency {row['frequency_hz']} Hz"
     )
     try:
-        retrieved_chunks = rag_retrieve(query, top_k=4)
+        retrieved_chunks = rag_retrieve(query, top_k=2)
     except RuntimeError as e:
         return jsonify({"error": str(e)}), 503
 
@@ -254,6 +387,9 @@ def diagnose_record(record_id):
     except Exception as e:
         return jsonify({"error": f"NVIDIA generation call failed: {e}"}), 502
 
+    # Append static safety disclaimer (not generated by LLM)
+    diagnosis_text = diagnosis_text + SAFETY_DISCLAIMER
+
     return jsonify({
         "record_id": record_id,
         "predicted_fault_type": pred_label,
@@ -265,7 +401,7 @@ def diagnose_record(record_id):
     })
 
 
-@app.route("/api/report/<record_id>", methods=["GET"])
+@app.route("/api/report/<record_id>", methods=["GET", "POST"])
 def generate_report(record_id):
     row = get_record_row(record_id)
     if row is None:
@@ -274,24 +410,34 @@ def generate_report(record_id):
     pred_label, probabilities = classify_row(row)
     fmt = request.args.get("format", "json")
 
-    query = f"Protection guidance and reporting requirements for a {FAULT_TYPE_LABELS.get(pred_label, pred_label)} fault"
-    try:
-        retrieved_chunks = rag_retrieve(query, top_k=3)
-    except RuntimeError:
-        retrieved_chunks = []
+    # Accept pre-fetched diagnosis from request body to avoid a second LLM call
+    body = {}
+    if request.method == "POST":
+        body = request.get_json(force=True, silent=True) or {}
+    diagnosis_text = body.get("diagnosis_text") or None
+    sources = body.get("sources") or []
 
-    diagnosis_text = None
-    sources = []
-    if retrieved_chunks:
-        system_prompt, user_prompt = build_diagnosis_prompt(row, pred_label, probabilities, retrieved_chunks)
+    # Only call LLM if no diagnosis was supplied
+    if not diagnosis_text:
+        query = f"Protection guidance for a {FAULT_TYPE_LABELS.get(pred_label, pred_label)} fault"
         try:
-            diagnosis_text = chat_complete([
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ])
-            sources = [c["source"] for c in retrieved_chunks]
-        except Exception:
-            diagnosis_text = None
+            retrieved_chunks = rag_retrieve(query, top_k=2)
+        except RuntimeError:
+            retrieved_chunks = []
+
+        if retrieved_chunks:
+            system_prompt, user_prompt = build_diagnosis_prompt(
+                row, pred_label, probabilities, retrieved_chunks
+            )
+            try:
+                diagnosis_text = chat_complete([
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ])
+                diagnosis_text = diagnosis_text + SAFETY_DISCLAIMER
+                sources = [c["source"] for c in retrieved_chunks]
+            except Exception:
+                diagnosis_text = None
 
     generated_at = datetime.now(timezone.utc).isoformat()
     md = f"""# GridGuard Fault Report
@@ -319,7 +465,7 @@ def generate_report(record_id):
 - **Estimated fault resistance:** {row.get('fault_resistance_ohm', 'N/A')} ohm
 
 ## AI Diagnosis & Recommendations
-{diagnosis_text if diagnosis_text else "_AI diagnosis unavailable (NVIDIA_API_KEY not configured or RAG index not built)._"}
+{diagnosis_text if diagnosis_text else "_AI diagnosis unavailable._"}
 
 ## Sources Referenced
 {chr(10).join(f"- {s}" for s in sources) if sources else "_None_"}
@@ -334,6 +480,21 @@ replace utility protection engineering review or established safety procedures.*
         return send_file(
             buf, mimetype="text/markdown", as_attachment=True,
             download_name=f"gridguard_report_{record_id}.md"
+        )
+
+    if fmt == "pdf":
+        pdf_buf = render_report_pdf({
+            "row": row,
+            "pred_label": pred_label,
+            "probabilities": probabilities,
+            "diagnosis_text": diagnosis_text,
+            "sources": sources,
+            "generated_at": generated_at,
+            "record_id": record_id,
+        })
+        return send_file(
+            pdf_buf, mimetype="application/pdf", as_attachment=True,
+            download_name=f"gridguard_report_{record_id}.pdf"
         )
 
     return jsonify({
