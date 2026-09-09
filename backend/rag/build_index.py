@@ -1,6 +1,6 @@
 """
 Chunks the markdown protection guideline documents in ./knowledge_base,
-embeds each chunk using the NVIDIA nv-embedqa-e5-v5 model, and stores the
+embeds each chunk using the NVIDIA nemotron-3-embed-1b model, and stores the
 vectors in a local persistent ChromaDB collection.
 
 Run once (or whenever knowledge_base/*.md changes):
@@ -63,7 +63,7 @@ def build_index():
     print(f"Loaded {len(chunks)} chunks from {KB_DIR}")
     texts = [c["text"] for c in chunks]
 
-    print("Embedding chunks via NVIDIA nv-embedqa-e5-v5 ...")
+    print("Embedding chunks via NVIDIA nemotron-3-embed-1b ...")
     embeddings = embed_texts(texts, input_type="passage")
 
     os.makedirs(CHROMA_DIR, exist_ok=True)

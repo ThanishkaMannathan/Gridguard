@@ -7,10 +7,13 @@ Never hardcode the key -- it is read from the environment only.
 """
 import os
 from openai import OpenAI
+from dotenv import load_dotenv
+
+load_dotenv()
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-GENERATION_MODEL = "meta/llama-3.1-70b-instruct"
-EMBEDDING_MODEL = "nvidia/nv-embedqa-e5-v5"
+GENERATION_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+EMBEDDING_MODEL = "nvidia/nemotron-3-embed-1b"
 
 _client = None
 
