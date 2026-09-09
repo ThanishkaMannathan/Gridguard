@@ -11,7 +11,7 @@ __pycache__/
 .venv/
 venv/
 env/
-backend/rag/chroma_db/
+# backend/rag/chroma_db/  # committed so Render doesn't need to call NVIDIA API at build time
 *.egg-info/
 
 # --- Node / frontend ---
@@ -32,3 +32,23 @@ yarn-error.log*
 # Removed from gitignore so Render doesn't need to rebuild them
 # backend/data/waveforms.json
 # backend/ml/fault_classifier.joblib
+
+# --- Flutter / mobile ---
+mobile/.env
+mobile/build/
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/.pub-cache/
+mobile/.pub/
+mobile/android/local.properties
+mobile/ios/.generated/
+mobile/ios/Flutter/App.framework
+mobile/ios/Flutter/Flutter.framework
+mobile/ios/Flutter/Flutter.podspec
+mobile/ios/Flutter/Generated.xcconfig
+mobile/ios/Flutter/app.flx
+mobile/ios/Flutter/app.zip
+mobile/ios/Flutter/flutter_assets/
+mobile/ios/Flutter/flutter_export_environment.sh
+mobile/ios/Pods/
