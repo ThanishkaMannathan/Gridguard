@@ -311,8 +311,27 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
         ],
       });
 
-      const blob = await Packer.toBlob(doc);
-      saveAs(blob, `GridGuard_Report_${Date.now()}.docx`);
+      // Use toBuffer + explicit MIME type so desktop Windows browsers
+      // correctly identify the file as a Word document (.docx).
+      const buffer = await Packer.toBuffer(doc);
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      });
+      const fileName = `GridGuard_Report_${Date.now()}.docx`;
+      // file-saver with explicit blob
+      try {
+        saveAs(blob, fileName);
+      } catch (_) {
+        // Fallback: manual anchor download (works on all desktop browsers)
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }
       setReportGenerated(true);
     } catch (e) {
       console.error("Word export error:", e);
