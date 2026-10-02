@@ -1,161 +1,162 @@
-import { useEffect, useState, useCallback } from "react";
-import Header from "./components/Header.jsx";
-import RecordList from "./components/RecordList.jsx";
-import FaultCharts from "./components/FaultCharts.jsx";
-import ClassificationPanel from "./components/ClassificationPanel.jsx";
-import DiagnosisPanel from "./components/DiagnosisPanel.jsx";
-import ReportView from "./components/ReportView.jsx";
+/**
+ * App.jsx – GridGuard v2.0 main application shell.
+ * Wires sidebar navigation, scenario state, and all page components.
+ */
+import { useEffect, useState } from "react";
+import Sidebar from "./components/Sidebar.jsx";
 import { api } from "./api.js";
+import { FAULT_SCENARIOS } from "./simulation.js";
+
+// Pages
+import Dashboard       from "./pages/Dashboard.jsx";
+import FaultDiagnosis  from "./pages/FaultDiagnosis.jsx";
+import LiveMonitor     from "./pages/LiveMonitor.jsx";
+import Waveforms       from "./pages/Waveforms.jsx";
+import DigitalGrid     from "./pages/DigitalGrid.jsx";
+import PredictiveGuard from "./pages/PredictiveGuard.jsx";
+import GridSimulator   from "./pages/GridSimulator.jsx";
+import FaultReplay     from "./pages/FaultReplay.jsx";
+import FaultHistory    from "./pages/FaultHistory.jsx";
+import FaultLocation   from "./pages/FaultLocation.jsx";
+import Reports         from "./pages/Reports.jsx";
+import LearnMode       from "./pages/LearnMode.jsx";
+
+function SplashScreen() {
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg-deep animate-fade-out" style={{ animationDelay: "2.5s", animationFillMode: "forwards" }}>
+      <div className="relative mb-8">
+        <svg width="120" height="80" viewBox="0 0 44 30" className="drop-shadow-[0_0_24px_rgba(47,217,210,0.5)]">
+          <path d="M0 15 Q 5.5 2, 11 15 T 22 15" fill="none" stroke="#2FD9D2" strokeWidth="1.8" />
+          <path d="M0 15 Q 5.5 22, 11 15 T 22 15 T 33 15" fill="none" stroke="#F5A623" strokeWidth="1.8" opacity="0.8" />
+          <path d="M0 15 Q 5.5 9, 11 15 T 22 15 T 33 15 T 44 15" fill="none" stroke="#8B7CF6" strokeWidth="1.8" opacity="0.65" />
+        </svg>
+      </div>
+      <h1 className="font-display font-semibold text-4xl tracking-wide text-ink-primary">
+        Grid<span className="text-signal-cyan">Guard</span>
+      </h1>
+      <p className="eyebrow mt-3 text-signal-amber">AI Power System Monitoring & Fault Diagnosis</p>
+      <p className="text-xs font-mono text-ink-faint mt-2">v2.0 · Simulation Mode</p>
+    </div>
+  );
+}
 
 export default function App() {
+  const [showSplash, setShowSplash] = useState(true);
   const [apiOnline, setApiOnline] = useState(false);
-  const [records, setRecords] = useState([]);
-  const [total, setTotal] = useState(0);
-  const [faultTypes, setFaultTypes] = useState([]);
-  const [filter, setFilter] = useState("");
-  const [recordsLoading, setRecordsLoading] = useState(true);
+  const [activePage, setActivePage] = useState("dashboard");
 
-  const [selectedId, setSelectedId] = useState(null);
-  const [record, setRecord] = useState(null);
+  // Global active scenario (used by all pages that don't manage their own records)
+  const [scenario, setScenario] = useState(FAULT_SCENARIOS.NORMAL);
 
-  const [classification, setClassification] = useState(null);
-  const [classifyLoading, setClassifyLoading] = useState(false);
-
-  const [diagnosis, setDiagnosis] = useState(null);
-  const [diagnosisLoading, setDiagnosisLoading] = useState(false);
-  const [diagnosisError, setDiagnosisError] = useState(null);
-
-  const [report, setReport] = useState(null);
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportError, setReportError] = useState(null);
+  // Classification/diagnosis state (passed to Reports)
+  const [lastClassification, setLastClassification] = useState(null);
+  const [lastDiagnosis, setLastDiagnosis] = useState(null);
 
   useEffect(() => {
     api.health().then(() => setApiOnline(true)).catch(() => setApiOnline(false));
+    const t = setTimeout(() => setShowSplash(false), 3200);
+    return () => clearTimeout(t);
   }, []);
 
-  const loadRecords = useCallback(() => {
-    setRecordsLoading(true);
-    api
-      .listRecords(filter ? { fault_type: filter, limit: 200 } : { limit: 200 })
-      .then((data) => {
-        setRecords(data.records);
-        setTotal(data.total);
-        setFaultTypes(data.fault_types);
-        setApiOnline(true);
-        if (!selectedId && data.records.length > 0) {
-          setSelectedId(data.records[0].record_id);
-        }
-      })
-      .catch(() => setApiOnline(false))
-      .finally(() => setRecordsLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
-
-  useEffect(() => {
-    loadRecords();
-  }, [loadRecords]);
-
-  useEffect(() => {
-    if (!selectedId) return;
-    setClassification(null);
-    setDiagnosis(null);
-    setDiagnosisError(null);
-    setReport(null);
-    setReportError(null);
-    api.getRecord(selectedId).then(setRecord).catch(() => setRecord(null));
-  }, [selectedId]);
-
-  const runClassify = () => {
-    setClassifyLoading(true);
-    api
-      .classify(selectedId)
-      .then(setClassification)
-      .catch((e) => setDiagnosisError(e.message))
-      .finally(() => setClassifyLoading(false));
+  const renderPage = () => {
+    switch (activePage) {
+      case "dashboard":
+        return <Dashboard scenario={scenario} />;
+      case "diagnosis":
+        return (
+          <FaultDiagnosis
+            scenario={scenario}
+            onScenarioChange={setScenario}
+            onClassification={setLastClassification}
+            onDiagnosis={setLastDiagnosis}
+          />
+        );
+      case "monitor":
+        return <LiveMonitor baseScenario={scenario} />;
+      case "waveforms":
+        return <Waveforms scenario={scenario} />;
+      case "grid":
+        return <DigitalGrid scenario={scenario} />;
+      case "predictive":
+        return <PredictiveGuard scenario={scenario} />;
+      case "simulator":
+        return <GridSimulator />;
+      case "replay":
+        return <FaultReplay scenario={scenario} />;
+      case "history":
+        return <FaultHistory />;
+      case "location":
+        return <FaultLocation scenario={scenario} />;
+      case "reports":
+        return <Reports scenario={scenario} lastClassification={lastClassification} lastDiagnosis={lastDiagnosis} />;
+      case "learn":
+        return <LearnMode />;
+      default:
+        return <Dashboard scenario={scenario} />;
+    }
   };
 
-  const runDiagnose = () => {
-    setDiagnosisLoading(true);
-    setDiagnosisError(null);
-    api
-      .diagnose(selectedId)
-      .then(setDiagnosis)
-      .catch((e) => setDiagnosisError(e.message))
-      .finally(() => setDiagnosisLoading(false));
-  };
-
-  const runReport = () => {
-    setReportLoading(true);
-    setReportError(null);
-    api
-      .downloadReportPdf(selectedId, diagnosis)
-      .catch((e) => setReportError(e.message))
-      .finally(() => setReportLoading(false));
-  };
+  // Quick scenario switcher at the top
+  const QUICK_SCENARIOS = [
+    { key: "NORMAL", icon: "🟢" },
+    { key: "LG",     icon: "🔴" },
+    { key: "LL",     icon: "🔴" },
+    { key: "LLG",    icon: "🔴" },
+    { key: "LLL",    icon: "🔴" },
+    { key: "VOLTAGE_IMBALANCE", icon: "🟠" },
+    { key: "OVERLOAD",          icon: "🟠" },
+  ];
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <Header apiOnline={apiOnline} />
+    <div className="min-h-screen flex flex-col bg-bg-deep">
+      {showSplash && <SplashScreen />}
 
-      <main className="flex-1 max-w-[1400px] w-full mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-[280px_1fr_360px] gap-6">
-        <div className="h-[calc(100vh-140px)] lg:sticky lg:top-24">
-          <RecordList
-            records={records}
-            total={total}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            filter={filter}
-            onFilterChange={setFilter}
-            faultTypes={faultTypes}
-            loading={recordsLoading}
-          />
-        </div>
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar */}
+        <Sidebar activePage={activePage} onNavigate={setActivePage} apiOnline={apiOnline} />
 
-        <div className="space-y-4 min-w-0">
-          {!apiOnline && (
-            <div className="panel p-4 text-sm text-signal-amber bg-signal-amber/5 border-signal-amber/30">
-              Backend unreachable. Confirm the Flask API is running and VITE_API_URL is set
-              correctly (see frontend/.env.example).
-            </div>
-          )}
-          {record ? (
-            <>
-              <div className="panel p-4 flex items-center justify-between">
-                <div>
-                  <p className="font-mono text-sm text-ink-muted">{record.record_id}</p>
-                  <p className="font-display text-xl font-semibold">{record.fault_type_label}</p>
-                </div>
-                <p className="text-xs text-ink-faint font-mono">dataset label: {record.fault_type}</p>
+        {/* Main content */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Top bar */}
+          <header className="border-b border-border bg-bg-panel/90 backdrop-blur sticky top-0 z-10 flex items-center gap-4 px-6 py-3">
+            <div className="flex-1 flex items-center gap-3">
+              <span className="text-xs text-ink-faint font-mono hidden md:block">Active Scenario:</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {QUICK_SCENARIOS.map((s) => {
+                  const sc = FAULT_SCENARIOS[s.key];
+                  const isActive = scenario.label === sc?.label;
+                  return (
+                    <button
+                      key={s.key}
+                      id={`quick-scenario-${s.key}`}
+                      onClick={() => sc && setScenario(sc)}
+                      title={sc?.label}
+                      className={`flex items-center gap-1 px-2.5 py-1 rounded border text-[10px] font-mono transition hover:scale-105 ${
+                        isActive ? "border-signal-cyan bg-signal-cyan/10 text-signal-cyan" : "border-border text-ink-faint hover:text-ink-primary hover:bg-bg-hover"
+                      }`}
+                    >
+                      {s.icon} {s.key}
+                    </button>
+                  );
+                })}
               </div>
-              <FaultCharts record={record} />
-              <ReportView
-                recordId={selectedId}
-                onGenerate={runReport}
-                loading={reportLoading}
-                report={report}
-                error={reportError}
-              />
-            </>
-          ) : (
-            <div className="panel p-8 text-center text-ink-muted">Select a fault record to begin.</div>
-          )}
-        </div>
+            </div>
+            <div className="flex items-center gap-2 text-[10px] font-mono text-signal-amber bg-signal-amber/10 border border-signal-amber/30 px-3 py-1 rounded-full">
+              🧪 SIMULATION MODE
+            </div>
+          </header>
 
-        <div className="space-y-4 min-w-0">
-          <ClassificationPanel result={classification} loading={classifyLoading} onClassify={runClassify} />
-          <DiagnosisPanel
-            diagnosis={diagnosis}
-            loading={diagnosisLoading}
-            error={diagnosisError}
-            onDiagnose={runDiagnose}
-            canDiagnose={!!classification}
-          />
-        </div>
-      </main>
+          {/* Page content */}
+          <main className="flex-1 overflow-y-auto">
+            {renderPage()}
+          </main>
 
-      <footer className="border-t border-border-soft py-4 text-center text-xs text-ink-faint font-mono">
-        GridGuard — decision support only. Not a substitute for utility protection engineering review.
-      </footer>
+          {/* Footer */}
+          <footer className="border-t border-border-soft py-2.5 text-center text-[10px] text-ink-faint font-mono bg-bg-panel/50">
+            GridGuard v2.0 — Decision support only. All simulation values are synthetic. Not real grid data.
+          </footer>
+        </div>
+      </div>
     </div>
   );
 }

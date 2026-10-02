@@ -32,7 +32,8 @@ fault reports.
 
 | Layer | Tech |
 |---|---|
-| Frontend | React (Vite), Tailwind CSS, Recharts |
+| Frontend (Web) | React (Vite), Tailwind CSS, Recharts |
+| Frontend (Mobile) | Flutter, Provider, fl_chart |
 | Backend | Python, Flask, REST API |
 | ML | scikit-learn (decision tree / logistic regression) |
 | RAG | ChromaDB (local persistent vector store) |
@@ -65,6 +66,15 @@ gridguard/
     │                     DiagnosisPanel, ReportView)
     ├── package.json
     ├── vercel.json
+    └── .env.example
+└── mobile/
+    ├── lib/
+    │   ├── core/                  (api_service.dart, theme.dart)
+    │   ├── providers/             (state management providers)
+    │   ├── screens/               (list, detail, report screens)
+    │   ├── widgets/               (reusable UI components)
+    │   └── main.dart
+    ├── pubspec.yaml
     └── .env.example
 ```
 
@@ -101,7 +111,7 @@ python rag/build_index.py      # requires NVIDIA_API_KEY for embeddings
 python app.py                  # runs on http://localhost:5000
 ```
 
-### 2. Frontend
+### 2. Frontend (Web)
 
 ```bash
 cd frontend
@@ -113,6 +123,19 @@ npm run dev                    # runs on http://localhost:5173
 
 Open http://localhost:5173, pick a fault record, click **Classify**, then
 **Diagnose**, then **Generate Report**.
+
+### 3. Mobile (Flutter)
+
+```bash
+cd mobile
+flutter pub get
+cp .env.example .env
+# API_BASE_URL=http://10.0.2.2:5000 (default for Android emulator connecting to localhost)
+flutter run
+```
+
+The web app and the mobile app share the exact same Flask backend. Any updates made in the backend will apply to both clients simultaneously.
+**Known Limitations:** PDF generation currently downloads the file directly to the device storage. iOS simulators might require additional permissions to view downloaded files.
 
 ## REST API
 

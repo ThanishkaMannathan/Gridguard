@@ -7,7 +7,7 @@ const LABELS = {
   LLLG: "Three-Phase-to-Ground",
 };
 
-export default function ClassificationPanel({ result, loading, onClassify }) {
+export default function ClassificationPanel({ result, loading, error, onClassify }) {
   return (
     <div className="panel p-4">
       <div className="flex items-center justify-between mb-3">
@@ -17,8 +17,14 @@ export default function ClassificationPanel({ result, loading, onClassify }) {
         </button>
       </div>
 
-      {!result && !loading && (
+      {!result && !loading && !error && (
         <p className="text-sm text-ink-muted">Run the classifier to identify the fault type from this record's electrical signature.</p>
+      )}
+
+      {error && (
+        <div className="text-sm text-signal-red bg-signal-red/10 border border-signal-red/30 rounded-md p-3">
+          {error}
+        </div>
       )}
 
       {result && (

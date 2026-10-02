@@ -1,7 +1,11 @@
+/* ── Google Fonts ─────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Base ─────────────────────────────────────────────────────── */
 html, body, #root {
   height: 100%;
 }
@@ -9,30 +13,25 @@ html, body, #root {
 body {
   @apply bg-bg-deep text-ink-primary font-body antialiased;
   background-image:
-    radial-gradient(circle at 15% 0%, rgba(47,217,210,0.06), transparent 40%),
-    radial-gradient(circle at 85% 20%, rgba(139,124,246,0.05), transparent 45%);
+    radial-gradient(ellipse at 0% 0%, rgba(47,217,210,0.04) 0%, transparent 50%),
+    radial-gradient(ellipse at 100% 100%, rgba(139,124,246,0.04) 0%, transparent 50%);
 }
 
 ::selection {
   background: rgba(47,217,210,0.25);
 }
 
-/* thin scrollbars to match the console aesthetic */
+/* ── Scrollbars ───────────────────────────────────────────────── */
 * {
   scrollbar-width: thin;
   scrollbar-color: #233049 transparent;
 }
-*::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-*::-webkit-scrollbar-thumb {
-  background: #233049;
-  border-radius: 4px;
-}
+*::-webkit-scrollbar { width: 5px; height: 5px; }
+*::-webkit-scrollbar-thumb { background: #233049; border-radius: 4px; }
 
+/* ── Utility classes ──────────────────────────────────────────── */
 .eyebrow {
-  @apply text-[11px] tracking-[0.18em] uppercase text-ink-faint font-mono;
+  @apply text-[10px] tracking-[0.18em] uppercase text-ink-faint font-mono;
 }
 
 .data-value {
@@ -40,15 +39,103 @@ body {
 }
 
 .panel {
-  @apply bg-bg-panel border border-border rounded-lg shadow-panel;
+  @apply bg-bg-panel border border-border rounded-xl;
+  box-shadow: 0 0 0 1px rgba(35,48,73,0.5), 0 4px 24px rgba(0,0,0,0.28);
 }
 
+/* ── Buttons ──────────────────────────────────────────────────── */
 .btn-primary {
-  @apply inline-flex items-center gap-2 px-4 py-2 rounded-md bg-signal-cyan text-bg-deep font-semibold text-sm
-    hover:brightness-110 active:brightness-95 transition disabled:opacity-40 disabled:cursor-not-allowed;
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-signal-cyan text-bg-deep font-semibold text-sm
+    hover:brightness-110 active:brightness-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed;
 }
 
 .btn-secondary {
-  @apply inline-flex items-center gap-2 px-4 py-2 rounded-md border border-border text-ink-primary text-sm font-medium
-    hover:bg-bg-hover transition disabled:opacity-40 disabled:cursor-not-allowed;
+  @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-ink-primary text-sm font-medium
+    hover:bg-bg-hover hover:border-border-soft transition-all disabled:opacity-40 disabled:cursor-not-allowed;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+.sidebar {
+  height: 100vh;
+  position: sticky;
+  top: 0;
+  overflow-y: auto;
+}
+
+/* ── Fade-in animation for results ───────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fadeIn {
+  animation: fadeIn 0.4s ease-out forwards;
+}
+
+/* ── Keyframes ────────────────────────────────────────────────── */
+@keyframes scan {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+@keyframes fadeOut {
+  0%   { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(47,217,210,0); }
+  50%       { box-shadow: 0 0 12px 4px rgba(47,217,210,0.25); }
+}
+
+/* Range input styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #17233A;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: currentColor;
+  margin-top: -5px;
+  cursor: pointer;
+  transition: transform 0.15s;
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #17233A;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+}
+
+/* Select element */
+select {
+  @apply bg-bg-raised border border-border rounded-md text-ink-primary;
+}
+select:focus {
+  @apply outline-none ring-1 ring-signal-cyan;
+}
+option {
+  @apply bg-bg-panel;
 }
