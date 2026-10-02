@@ -1,12 +1,38 @@
 /**
- * Reports.jsx – Engineering report generation with PDF download.
+ * Reports.jsx – Engineering report generation.
+ * Supports: Word (.docx), Markdown (.md), PDF (backend).
  */
 import { useState } from "react";
-import { computeGridHealth, computeFaultRisk, getRiskLevel, generateXAIFactors, generateWaveform } from "../simulation.js";
+import {
+  computeGridHealth,
+  computeFaultRisk,
+  getRiskLevel,
+  generateXAIFactors,
+} from "../simulation.js";
 import { api } from "../api.js";
+import {
+  Document,
+  Packer,
+  Paragraph,
+  TextRun,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  HeadingLevel,
+  AlignmentType,
+  BorderStyle,
+  ShadingType,
+  Header,
+  Footer,
+  PageNumber,
+  NumberFormat,
+} from "docx";
+import { saveAs } from "file-saver";
 
 export default function Reports({ scenario, lastClassification, lastDiagnosis }) {
   const [generating, setGenerating] = useState(false);
+  const [genType, setGenType] = useState(null); // "word"|"md"|"pdf"
   const [reportGenerated, setReportGenerated] = useState(false);
   const [includeWaveform, setIncludeWaveform] = useState(true);
   const [includeXAI, setIncludeXAI] = useState(true);
@@ -16,60 +42,354 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
   const riskLevel = getRiskLevel(risk);
   const xaiFacts = generateXAIFactors(scenario);
 
-  // PDF via backend if record selected, else client-side markdown
-  const generateReport = async () => {
-    setGenerating(true);
-    try {
-      // Try backend PDF first
-      if (lastClassification?.record_id) {
-        await api.downloadReportPdf(lastClassification.record_id, lastDiagnosis);
-        setReportGenerated(true);
-        return;
-      }
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const now = new Date();
+  const timestamp = now.toLocaleString();
+  const isoTs = now.toISOString();
 
-      // Client-side text report
+  // ── Word Document Generator ────────────────────────────────────────────────
+  const downloadWord = async () => {
+    setGenerating(true);
+    setGenType("word");
+    try {
+      // colour constants (hex without #)
+      const CYAN   = "2FD9D2";
+      const AMBER  = "F5A623";
+      const RED    = "FF5470";
+      const GREEN  = "3ADC8C";
+      const DARK   = "0F1829";
+      const MUTED  = "64748B";
+      const FAULT_COLOR = scenario.faultType && scenario.faultType !== "NONE" ? RED : GREEN;
+
+      // ── helper paragraph builders ──────────────────────────────────────────
+      const heading = (text, level = HeadingLevel.HEADING_1) =>
+        new Paragraph({
+          text,
+          heading: level,
+          spacing: { before: 300, after: 120 },
+          border: level === HeadingLevel.HEADING_1
+            ? { bottom: { style: BorderStyle.SINGLE, size: 6, color: CYAN } }
+            : {},
+        });
+
+      const body = (text, opts = {}) =>
+        new Paragraph({
+          children: [new TextRun({ text, size: 22, color: "1E293B", ...opts })],
+          spacing: { after: 80 },
+        });
+
+      const kv = (label, value, valueColor = "1E293B") =>
+        new Paragraph({
+          children: [
+            new TextRun({ text: `${label}: `, bold: true, size: 22, color: MUTED }),
+            new TextRun({ text: String(value), size: 22, color: valueColor }),
+          ],
+          spacing: { after: 80 },
+        });
+
+      const spacer = () => new Paragraph({ text: "", spacing: { after: 100 } });
+
+      // ── Table builder ──────────────────────────────────────────────────────
+      const makeTable = (headers, rows) =>
+        new Table({
+          width: { size: 100, type: WidthType.PERCENTAGE },
+          rows: [
+            new TableRow({
+              tableHeader: true,
+              children: headers.map((h) =>
+                new TableCell({
+                  children: [
+                    new Paragraph({
+                      children: [new TextRun({ text: h, bold: true, size: 20, color: "FFFFFF" })],
+                      alignment: AlignmentType.CENTER,
+                    }),
+                  ],
+                  shading: { type: ShadingType.CLEAR, fill: DARK },
+                  margins: { top: 80, bottom: 80, left: 100, right: 100 },
+                })
+              ),
+            }),
+            ...rows.map((row, ri) =>
+              new TableRow({
+                children: row.map((cell) =>
+                  new TableCell({
+                    children: [
+                      new Paragraph({
+                        children: [new TextRun({ text: String(cell), size: 20, color: "1E293B" })],
+                        alignment: AlignmentType.CENTER,
+                      }),
+                    ],
+                    shading: { type: ShadingType.CLEAR, fill: ri % 2 === 0 ? "F8FAFC" : "FFFFFF" },
+                    margins: { top: 60, bottom: 60, left: 100, right: 100 },
+                  })
+                ),
+              })
+            ),
+          ],
+        });
+
+      // ── XAI section ────────────────────────────────────────────────────────
+      const xaiRows = includeXAI
+        ? [
+            heading("5. AI Explanation (XAI)", HeadingLevel.HEADING_2),
+            body("The following factors influenced the fault risk assessment:"),
+            spacer(),
+            ...xaiFacts.flatMap((f) => [
+              new Paragraph({
+                children: [
+                  new TextRun({ text: `● ${f.name} `, bold: true, size: 22, color: "1E293B" }),
+                  new TextRun({ text: `[${f.impact}] `, size: 22, color: f.impact === "Critical" ? RED : f.impact === "High" ? "FF8C42" : f.impact === "Medium" ? AMBER : GREEN }),
+                  new TextRun({ text: `${f.direction} ${f.value}`, size: 22, color: MUTED }),
+                  new TextRun({ text: ` — ${f.description}`, size: 22, color: "1E293B" }),
+                ],
+                spacing: { after: 80 },
+              }),
+            ]),
+            spacer(),
+          ]
+        : [];
+
+      // ── Backend diagnosis section ──────────────────────────────────────────
+      const diagRows = lastDiagnosis
+        ? [
+            heading("6. AI Diagnosis (Backend)", HeadingLevel.HEADING_2),
+            body(lastDiagnosis.diagnosis || "No diagnosis text available."),
+            spacer(),
+          ]
+        : [];
+
+      // ── Build Document ─────────────────────────────────────────────────────
+      const doc = new Document({
+        creator: "GridGuard v2.0",
+        title: "GridGuard Fault Analysis Report",
+        description: "AI Power System Fault Diagnosis Report",
+        styles: {
+          default: {
+            document: {
+              run: { font: "Calibri", size: 22 },
+            },
+          },
+          paragraphStyles: [
+            {
+              id: "Heading1",
+              name: "Heading 1",
+              basedOn: "Normal",
+              next: "Normal",
+              run: { bold: true, size: 32, color: DARK, font: "Calibri" },
+              paragraph: { spacing: { before: 400, after: 200 } },
+            },
+            {
+              id: "Heading2",
+              name: "Heading 2",
+              basedOn: "Normal",
+              next: "Normal",
+              run: { bold: true, size: 26, color: "334155", font: "Calibri" },
+              paragraph: { spacing: { before: 300, after: 120 } },
+            },
+          ],
+        },
+        sections: [
+          {
+            headers: {
+              default: new Header({
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({ text: "⚡ GRIDGUARD  |  AI Power System Fault Diagnosis", size: 18, color: MUTED }),
+                      new TextRun({ text: "        ", size: 18 }),
+                      new TextRun({ text: "SIMULATION MODE 🧪", size: 18, color: AMBER, bold: true }),
+                    ],
+                    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "E2E8F0" } },
+                    spacing: { after: 100 },
+                  }),
+                ],
+              }),
+            },
+            footers: {
+              default: new Footer({
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({ text: `Generated: ${isoTs}  |  GridGuard v2.0  |  Simulation data only — not real grid measurements.`, size: 16, color: MUTED }),
+                    ],
+                    border: { top: { style: BorderStyle.SINGLE, size: 4, color: "E2E8F0" } },
+                    spacing: { before: 100 },
+                  }),
+                ],
+              }),
+            },
+            children: [
+              // ── Cover ─────────────────────────────────────────────────────
+              new Paragraph({
+                children: [new TextRun({ text: "GridGuard", bold: true, size: 72, color: CYAN })],
+                alignment: AlignmentType.CENTER,
+                spacing: { before: 600, after: 200 },
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: "Fault Analysis Report", size: 40, color: DARK })],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 200 },
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: timestamp, size: 22, color: MUTED })],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 600 },
+              }),
+
+              // ── 1. Summary ────────────────────────────────────────────────
+              heading("1. Executive Summary"),
+              kv("Grid Health Score", `${health} / 100`, health >= 70 ? GREEN : health >= 40 ? AMBER : RED),
+              kv("Fault Risk",        `${risk.toFixed(0)}%`, riskLevel.color?.replace("#","") || RED),
+              kv("Risk Level",        riskLevel.label),
+              kv("Fault Type",        scenario.faultType || "NONE", FAULT_COLOR),
+              kv("Affected Phase",    scenario.affectedPhase || "None", AMBER),
+              kv("Severity",          scenario.severity || "Normal"),
+              kv("Fault Location",    scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% of line (SIMULATED)` : "N/A"),
+              spacer(),
+
+              // ── 2. Input Parameters ───────────────────────────────────────
+              heading("2. Input Parameters"),
+              makeTable(
+                ["Parameter", "Phase A", "Phase B", "Phase C"],
+                [
+                  ["Voltage (V)", scenario.Va, scenario.Vb, scenario.Vc],
+                  ["Current (A)", scenario.Ia, scenario.Ib, scenario.Ic],
+                  ["Frequency (Hz)", scenario.frequency, "—", "—"],
+                  ["Power Factor", scenario.powerFactor, "—", "—"],
+                  ["V-Unbalance (%)", scenario.voltageUnbalance ?? "—", "—", "—"],
+                  ["I-Unbalance (%)", scenario.currentUnbalance ?? "—", "—", "—"],
+                ]
+              ),
+              spacer(),
+
+              // ── 3. Fault Analysis ─────────────────────────────────────────
+              heading("3. Fault Analysis"),
+              makeTable(
+                ["Property", "Value"],
+                [
+                  ["Fault Type",     scenario.faultType || "NONE"],
+                  ["Affected Phase", scenario.affectedPhase || "None"],
+                  ["Severity",       scenario.severity || "Normal"],
+                  ["Fault Location", scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% (SIMULATED)` : "N/A"],
+                  ["Confidence",     scenario.confidence != null ? `${(scenario.confidence * 100).toFixed(1)}%` : "N/A"],
+                ]
+              ),
+              spacer(),
+
+              // ── 4. Grid Health ────────────────────────────────────────────
+              heading("4. Grid Health Assessment"),
+              makeTable(
+                ["Metric", "Value"],
+                [
+                  ["Grid Health Score", `${health} / 100`],
+                  ["Fault Risk",        `${risk.toFixed(1)}%`],
+                  ["Risk Level",        riskLevel.label],
+                  ["Active Power (kW)", scenario.activePower != null ? `${scenario.activePower.toFixed(1)} kW` : "—"],
+                  ["Reactive Power (kVAR)", scenario.reactivePower != null ? `${scenario.reactivePower.toFixed(1)} kVAR` : "—"],
+                  ["Power Factor",      scenario.powerFactor ?? "—"],
+                ]
+              ),
+              spacer(),
+
+              // ── 5. XAI ────────────────────────────────────────────────────
+              ...xaiRows,
+
+              // ── 6. AI Diagnosis ───────────────────────────────────────────
+              ...diagRows,
+
+              // ── Disclaimer ────────────────────────────────────────────────
+              heading("Disclaimer", HeadingLevel.HEADING_2),
+              body(
+                "This report was generated by GridGuard v2.0 in SIMULATION MODE. " +
+                "All parameter values and fault assessments are simulated and do NOT " +
+                "represent actual grid measurements. GridGuard's diagnosis and " +
+                "recommendations are decision support only and do not replace utility " +
+                "protection engineering review or applicable safety/regulatory requirements."
+              ),
+            ],
+          },
+        ],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      saveAs(blob, `GridGuard_Report_${Date.now()}.docx`);
+      setReportGenerated(true);
+    } catch (e) {
+      console.error("Word export error:", e);
+      alert("Word export failed: " + e.message);
+    } finally {
+      setGenerating(false);
+      setGenType(null);
+    }
+  };
+
+  // ── Markdown Download ───────────────────────────────────────────────────────
+  const downloadMarkdown = () => {
+    setGenerating(true);
+    setGenType("md");
+    try {
       const lines = [];
       lines.push("# GridGuard Fault Report");
-      lines.push(`\n**Generated:** ${new Date().toISOString()}`);
-      lines.push(`**Source:** Simulation Mode 🧪`);
-      lines.push("\n---\n");
-      lines.push("## Input Parameters");
-      lines.push(`| Parameter | Phase A | Phase B | Phase C |`);
-      lines.push(`|---|---|---|---|`);
-      lines.push(`| Voltage (V) | ${scenario.Va} | ${scenario.Vb} | ${scenario.Vc} |`);
-      lines.push(`| Current (A) | ${scenario.Ia} | ${scenario.Ib} | ${scenario.Ic} |`);
-      lines.push(`| Frequency (Hz) | ${scenario.frequency} | | |`);
-      lines.push(`| Power Factor | ${scenario.powerFactor} | | |`);
-      lines.push(`| V-Unbalance (%) | ${scenario.voltageUnbalance} | | |`);
-      lines.push(`| I-Unbalance (%) | ${scenario.currentUnbalance} | | |`);
-      lines.push("\n## Fault Analysis");
+      lines.push(`\n**Generated:** ${isoTs}`);
+      lines.push(`**Source:** Simulation Mode 🧪\n\n---\n`);
+      lines.push("## 1. Executive Summary");
+      lines.push(`- **Grid Health Score:** ${health}/100`);
+      lines.push(`- **Fault Risk:** ${risk.toFixed(0)}%  —  ${riskLevel.label}`);
       lines.push(`- **Fault Type:** ${scenario.faultType || "NONE"}`);
       lines.push(`- **Affected Phase:** ${scenario.affectedPhase || "None"}`);
       lines.push(`- **Severity:** ${scenario.severity || "Normal"}`);
       lines.push(`- **Fault Location:** ${scenario.faultLocation != null ? scenario.faultLocation.toFixed(1) + "% of line (SIMULATED)" : "N/A"}`);
-      lines.push("\n## Grid Health");
+      lines.push("\n## 2. Input Parameters");
+      lines.push("| Parameter | Phase A | Phase B | Phase C |");
+      lines.push("|---|---|---|---|");
+      lines.push(`| Voltage (V) | ${scenario.Va} | ${scenario.Vb} | ${scenario.Vc} |`);
+      lines.push(`| Current (A) | ${scenario.Ia} | ${scenario.Ib} | ${scenario.Ic} |`);
+      lines.push(`| Frequency (Hz) | ${scenario.frequency} | | |`);
+      lines.push(`| Power Factor | ${scenario.powerFactor} | | |`);
+      lines.push("\n## 3. Grid Health");
       lines.push(`- **Grid Health Score:** ${health}/100`);
       lines.push(`- **Fault Risk:** ${risk.toFixed(0)}%`);
       lines.push(`- **Risk Level:** ${riskLevel.label}`);
       if (includeXAI) {
-        lines.push("\n## AI Explanation");
-        xaiFacts.forEach((f) => lines.push(`- **${f.name}** (${f.impact}): ${f.direction} ${f.value} — ${f.description}`));
+        lines.push("\n## 4. AI Explanation");
+        xaiFacts.forEach((f) =>
+          lines.push(`- **${f.name}** [${f.impact}]: ${f.direction} ${f.value} — ${f.description}`)
+        );
       }
-      lines.push(`\n---\n*Generated by GridGuard v2.0. Simulation data only. Not real grid measurements.*`);
+      if (lastDiagnosis) {
+        lines.push("\n## 5. AI Diagnosis (Backend)");
+        lines.push(lastDiagnosis.diagnosis || "No diagnosis text.");
+      }
+      lines.push("\n---\n*Simulation data only. Not real grid measurements.*");
 
-      const content = lines.join("\n");
-      const blob = new Blob([content], { type: "text/markdown" });
+      const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `gridguard_report_${Date.now()}.md`;
+      a.download = `GridGuard_Report_${Date.now()}.md`;
       a.click();
       URL.revokeObjectURL(url);
       setReportGenerated(true);
-    } catch (e) {
-      console.error(e);
     } finally {
       setGenerating(false);
+      setGenType(null);
+    }
+  };
+
+  // ── PDF via backend ─────────────────────────────────────────────────────────
+  const downloadPDF = async () => {
+    if (!lastClassification?.record_id) return;
+    setGenerating(true);
+    setGenType("pdf");
+    try {
+      await api.downloadReportPdf(lastClassification.record_id, lastDiagnosis);
+      setReportGenerated(true);
+    } catch (e) {
+      console.error(e);
+      alert("PDF download failed: " + e.message);
+    } finally {
+      setGenerating(false);
+      setGenType(null);
     }
   };
 
@@ -80,15 +400,16 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-display font-semibold text-xl">Engineering Report</h2>
-          <p className="text-xs text-ink-muted mt-1">Generate and download a fault analysis report</p>
+          <p className="text-xs text-ink-muted mt-1">Generate and download a professional fault analysis report</p>
         </div>
+        {/* Primary CTA — Word */}
         <button
           className="btn-primary"
-          onClick={generateReport}
+          onClick={downloadWord}
           disabled={generating}
           id="generate-report-btn"
         >
-          {generating ? "⏳ Generating…" : "📄 Generate & Download Report"}
+          {generating && genType === "word" ? "⏳ Generating…" : "📝 Download Word Report"}
         </button>
       </div>
 
@@ -98,9 +419,8 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
         </div>
       )}
 
-      {/* Report preview */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-        {/* Report content preview */}
+        {/* Report preview */}
         <div className="space-y-4">
           <div className="panel p-5">
             <div className="flex items-center gap-2 mb-4 pb-3 border-b border-border-soft">
@@ -111,12 +431,12 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
               </svg>
               <div>
                 <p className="font-display font-bold text-base">GridGuard Fault Report</p>
-                <p className="text-[10px] font-mono text-ink-faint">Generated: {new Date().toLocaleString()}</p>
+                <p className="text-[10px] font-mono text-ink-faint">Generated: {timestamp}</p>
               </div>
               <span className="ml-auto text-[10px] font-mono px-2 py-0.5 rounded bg-signal-amber/10 border border-signal-amber/30 text-signal-amber">🧪 SIMULATION</span>
             </div>
 
-            {/* Input params section */}
+            {/* Input params */}
             <div className="mb-4">
               <p className="eyebrow mb-2">Input Parameters</p>
               <table className="w-full text-xs font-mono">
@@ -142,7 +462,7 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
               <p className="eyebrow mb-2">Fault Analysis</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: "Fault Type",    value: scenario.faultType || "NONE",       color: scenario.faultType === "NONE" ? "#3ADC8C" : "#FF5470" },
+                  { label: "Fault Type",    value: scenario.faultType || "NONE",       color: scenario.faultType && scenario.faultType !== "NONE" ? "#FF5470" : "#3ADC8C" },
                   { label: "Affected Phase",value: scenario.affectedPhase || "None",   color: "#F5A623" },
                   { label: "Severity",      value: scenario.severity || "Normal",      color: riskLevel.color },
                   { label: "Location",      value: scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% (SIM)` : "N/A", color: "#2FD9D2" },
@@ -175,7 +495,6 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
               </div>
             </div>
 
-            {/* AI Diagnosis from backend */}
             {lastDiagnosis && (
               <div className="mb-4">
                 <p className="eyebrow mb-2">AI Diagnosis</p>
@@ -187,14 +506,14 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
           </div>
         </div>
 
-        {/* Options + XAI */}
+        {/* Options + Export buttons */}
         <div className="space-y-4">
           <div className="panel p-5">
             <p className="eyebrow mb-3">Report Options</p>
             <div className="space-y-3">
               {[
-                { id: "opt-waveform", label: "Include Waveform", value: includeWaveform, set: setIncludeWaveform },
-                { id: "opt-xai",     label: "Include AI Explanation", value: includeXAI, set: setIncludeXAI },
+                { id: "opt-waveform", label: "Include Waveform Note",   value: includeWaveform, set: setIncludeWaveform },
+                { id: "opt-xai",     label: "Include AI Explanation",   value: includeXAI,      set: setIncludeXAI },
               ].map((opt) => (
                 <label key={opt.id} className="flex items-center gap-3 cursor-pointer">
                   <div
@@ -208,15 +527,50 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
                 </label>
               ))}
             </div>
-            <div className="mt-4 pt-4 border-t border-border-soft">
-              <p className="eyebrow mb-2">Export Formats</p>
-              <div className="flex gap-2">
-                <button className="btn-primary text-xs !px-3 !py-1.5" onClick={generateReport} disabled={generating} id="download-pdf-btn">
-                  📄 {lastClassification ? "Download PDF" : "Download MD"}
+
+            {/* Export buttons */}
+            <div className="mt-5 pt-4 border-t border-border-soft">
+              <p className="eyebrow mb-3">Export Formats</p>
+              <div className="flex flex-col gap-2">
+
+                {/* Word — primary */}
+                <button
+                  className="btn-primary flex items-center gap-2 justify-center"
+                  onClick={downloadWord}
+                  disabled={generating}
+                  id="download-word-btn"
+                >
+                  <span>📝</span>
+                  <span>{generating && genType === "word" ? "Generating Word…" : "Download Word (.docx)"}</span>
                 </button>
+
+                {/* Markdown */}
+                <button
+                  className="btn-ghost flex items-center gap-2 justify-center"
+                  onClick={downloadMarkdown}
+                  disabled={generating}
+                  id="download-md-btn"
+                >
+                  <span>📄</span>
+                  <span>{generating && genType === "md" ? "Generating…" : "Download Markdown (.md)"}</span>
+                </button>
+
+                {/* PDF — only if backend record is available */}
+                {lastClassification?.record_id && (
+                  <button
+                    className="btn-ghost flex items-center gap-2 justify-center"
+                    onClick={downloadPDF}
+                    disabled={generating}
+                    id="download-pdf-btn"
+                  >
+                    <span>🖨️</span>
+                    <span>{generating && genType === "pdf" ? "Generating PDF…" : "Download PDF (backend)"}</span>
+                  </button>
+                )}
               </div>
-              <p className="text-[10px] font-mono text-ink-faint mt-2">
-                {lastClassification ? "PDF generated via backend API" : "Markdown report (backend offline or no record selected)"}
+
+              <p className="text-[10px] font-mono text-ink-faint mt-3">
+                Word & Markdown export work offline. PDF requires backend connection.
               </p>
             </div>
           </div>
@@ -224,7 +578,7 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
           {/* XAI section */}
           {includeXAI && (
             <div className="panel p-5">
-              <p className="eyebrow mb-3">AI Explanation</p>
+              <p className="eyebrow mb-3">AI Explanation (XAI)</p>
               <div className="space-y-2">
                 {xaiFacts.map((f, i) => (
                   <div key={i} className="p-2.5 rounded-lg bg-bg-raised border border-border-soft text-xs">
