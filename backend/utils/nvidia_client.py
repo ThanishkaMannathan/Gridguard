@@ -14,7 +14,8 @@ load_dotenv()
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 # nemotron-3-super-120b-a12b reached EOL on 2026-10-03; replaced with lightning variant.
 GENERATION_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
-EMBEDDING_MODEL = "nvidia/nv-embedqa-e5-v5"
+# Keep embedding model consistent with the existing ChromaDB index.
+EMBEDDING_MODEL = "nvidia/nemotron-3-embed-1b"
 
 _client = None
 
