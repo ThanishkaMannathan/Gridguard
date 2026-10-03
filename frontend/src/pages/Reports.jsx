@@ -1,6 +1,6 @@
 /**
  * Reports.jsx – Engineering report generation.
- * Supports: Word (.docx), Markdown (.md), PDF (backend).
+ * Supports: PDF (jsPDF, browser-native), Markdown (.md), PDF (backend).
  */
 import { useState } from "react";
 import {
@@ -10,25 +10,7 @@ import {
   generateXAIFactors,
 } from "../simulation.js";
 import { api } from "../api.js";
-import {
-  Document,
-  Packer,
-  Paragraph,
-  TextRun,
-  Table,
-  TableRow,
-  TableCell,
-  WidthType,
-  HeadingLevel,
-  AlignmentType,
-  BorderStyle,
-  ShadingType,
-  Header,
-  Footer,
-  PageNumber,
-  NumberFormat,
-} from "docx";
-import { saveAs } from "file-saver";
+import { jsPDF } from "jspdf";
 
 export default function Reports({ scenario, lastClassification, lastDiagnosis }) {
   const [generating, setGenerating] = useState(false);
@@ -47,295 +29,290 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
   const timestamp = now.toLocaleString();
   const isoTs = now.toISOString();
 
-  // ── Word Document Generator ────────────────────────────────────────────────
-  const downloadWord = async () => {
+  // ── PDF Document Generator (jsPDF — 100% browser-native) ──────────────────
+  const downloadPDFReport = async () => {
     setGenerating(true);
-    setGenType("word");
+    setGenType("pdf");
     try {
-      // colour constants (hex without #)
-      const CYAN   = "2FD9D2";
-      const AMBER  = "F5A623";
-      const RED    = "FF5470";
-      const GREEN  = "3ADC8C";
-      const DARK   = "0F1829";
-      const MUTED  = "64748B";
-      const FAULT_COLOR = scenario.faultType && scenario.faultType !== "NONE" ? RED : GREEN;
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const W = 210; // A4 width mm
+      const MARGIN = 18;
+      const CONTENT_W = W - MARGIN * 2;
+      let y = 0;
 
-      // ── helper paragraph builders ──────────────────────────────────────────
-      const heading = (text, level = HeadingLevel.HEADING_1) =>
-        new Paragraph({
-          text,
-          heading: level,
-          spacing: { before: 300, after: 120 },
-          border: level === HeadingLevel.HEADING_1
-            ? { bottom: { style: BorderStyle.SINGLE, size: 6, color: CYAN } }
-            : {},
-        });
+      // ── colour helpers (RGB arrays) ────────────────────────────────────────
+      const C = {
+        cyan:   [47, 217, 210],
+        amber:  [245, 166, 35],
+        red:    [255, 84, 112],
+        green:  [58, 220, 140],
+        dark:   [15, 24, 41],
+        ink:    [30, 41, 59],
+        muted:  [100, 116, 139],
+        white:  [255, 255, 255],
+        light:  [248, 250, 252],
+        border: [226, 232, 240],
+      };
+      const hasFault = scenario.faultType && scenario.faultType !== "NONE";
+      const faultColor = hasFault ? C.red : C.green;
 
-      const body = (text, opts = {}) =>
-        new Paragraph({
-          children: [new TextRun({ text, size: 22, color: "1E293B", ...opts })],
-          spacing: { after: 80 },
-        });
+      const setColor  = (rgb) => doc.setTextColor(...rgb);
+      const setFill   = (rgb) => doc.setFillColor(...rgb);
+      const setDraw   = (rgb) => doc.setDrawColor(...rgb);
 
-      const kv = (label, value, valueColor = "1E293B") =>
-        new Paragraph({
-          children: [
-            new TextRun({ text: `${label}: `, bold: true, size: 22, color: MUTED }),
-            new TextRun({ text: String(value), size: 22, color: valueColor }),
-          ],
-          spacing: { after: 80 },
-        });
+      const needPage = (needed = 20) => {
+        if (y + needed > 275) { doc.addPage(); y = MARGIN; addPageHeader(); }
+      };
 
-      const spacer = () => new Paragraph({ text: "", spacing: { after: 100 } });
+      const addPageHeader = () => {
+        doc.setFontSize(7.5);
+        setColor(C.muted);
+        doc.text("⚡ GRIDGUARD  |  AI Power System Fault Diagnosis", MARGIN, 10);
+        doc.text("SIMULATION MODE", W - MARGIN, 10, { align: "right" });
+        setDraw(C.border);
+        doc.line(MARGIN, 12, W - MARGIN, 12);
+      };
 
-      // ── Table builder ──────────────────────────────────────────────────────
-      const makeTable = (headers, rows) =>
-        new Table({
-          width: { size: 100, type: WidthType.PERCENTAGE },
-          rows: [
-            new TableRow({
-              tableHeader: true,
-              children: headers.map((h) =>
-                new TableCell({
-                  children: [
-                    new Paragraph({
-                      children: [new TextRun({ text: h, bold: true, size: 20, color: "FFFFFF" })],
-                      alignment: AlignmentType.CENTER,
-                    }),
-                  ],
-                  shading: { type: ShadingType.CLEAR, fill: DARK },
-                  margins: { top: 80, bottom: 80, left: 100, right: 100 },
-                })
-              ),
-            }),
-            ...rows.map((row, ri) =>
-              new TableRow({
-                children: row.map((cell) =>
-                  new TableCell({
-                    children: [
-                      new Paragraph({
-                        children: [new TextRun({ text: String(cell), size: 20, color: "1E293B" })],
-                        alignment: AlignmentType.CENTER,
-                      }),
-                    ],
-                    shading: { type: ShadingType.CLEAR, fill: ri % 2 === 0 ? "F8FAFC" : "FFFFFF" },
-                    margins: { top: 60, bottom: 60, left: 100, right: 100 },
-                  })
-                ),
-              })
-            ),
-          ],
-        });
+      const addPageFooter = () => {
+        setDraw(C.border);
+        doc.line(MARGIN, 285, W - MARGIN, 285);
+        doc.setFontSize(7);
+        setColor(C.muted);
+        doc.text(`Generated: ${isoTs}  |  GridGuard v2.0  |  Simulation data only`, MARGIN, 290);
+        doc.text(`Page ${doc.getCurrentPageInfo().pageNumber}`, W - MARGIN, 290, { align: "right" });
+      };
 
-      // ── XAI section ────────────────────────────────────────────────────────
-      const xaiRows = includeXAI
-        ? [
-            heading("5. AI Explanation (XAI)", HeadingLevel.HEADING_2),
-            body("The following factors influenced the fault risk assessment:"),
-            spacer(),
-            ...xaiFacts.flatMap((f) => [
-              new Paragraph({
-                children: [
-                  new TextRun({ text: `● ${f.name} `, bold: true, size: 22, color: "1E293B" }),
-                  new TextRun({ text: `[${f.impact}] `, size: 22, color: f.impact === "Critical" ? RED : f.impact === "High" ? "FF8C42" : f.impact === "Medium" ? AMBER : GREEN }),
-                  new TextRun({ text: `${f.direction} ${f.value}`, size: 22, color: MUTED }),
-                  new TextRun({ text: ` — ${f.description}`, size: 22, color: "1E293B" }),
-                ],
-                spacing: { after: 80 },
-              }),
-            ]),
-            spacer(),
-          ]
-        : [];
+      // ── Cover Page ─────────────────────────────────────────────────────────
+      setFill(C.dark);
+      doc.rect(0, 0, W, 297, "F");
 
-      // ── Backend diagnosis section ──────────────────────────────────────────
-      const diagRows = lastDiagnosis
-        ? [
-            heading("6. AI Diagnosis (Backend)", HeadingLevel.HEADING_2),
-            body(lastDiagnosis.diagnosis || "No diagnosis text available."),
-            spacer(),
-          ]
-        : [];
+      // Accent bar
+      setFill(C.cyan);
+      doc.rect(0, 0, 6, 297, "F");
 
-      // ── Build Document ─────────────────────────────────────────────────────
-      const doc = new Document({
-        creator: "GridGuard v2.0",
-        title: "GridGuard Fault Analysis Report",
-        description: "AI Power System Fault Diagnosis Report",
-        styles: {
-          default: {
-            document: {
-              run: { font: "Calibri", size: 22 },
-            },
-          },
-          paragraphStyles: [
-            {
-              id: "Heading1",
-              name: "Heading 1",
-              basedOn: "Normal",
-              next: "Normal",
-              run: { bold: true, size: 32, color: DARK, font: "Calibri" },
-              paragraph: { spacing: { before: 400, after: 200 } },
-            },
-            {
-              id: "Heading2",
-              name: "Heading 2",
-              basedOn: "Normal",
-              next: "Normal",
-              run: { bold: true, size: 26, color: "334155", font: "Calibri" },
-              paragraph: { spacing: { before: 300, after: 120 } },
-            },
-          ],
-        },
-        sections: [
-          {
-            headers: {
-              default: new Header({
-                children: [
-                  new Paragraph({
-                    children: [
-                      new TextRun({ text: "⚡ GRIDGUARD  |  AI Power System Fault Diagnosis", size: 18, color: MUTED }),
-                      new TextRun({ text: "        ", size: 18 }),
-                      new TextRun({ text: "SIMULATION MODE 🧪", size: 18, color: AMBER, bold: true }),
-                    ],
-                    border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "E2E8F0" } },
-                    spacing: { after: 100 },
-                  }),
-                ],
-              }),
-            },
-            footers: {
-              default: new Footer({
-                children: [
-                  new Paragraph({
-                    children: [
-                      new TextRun({ text: `Generated: ${isoTs}  |  GridGuard v2.0  |  Simulation data only — not real grid measurements.`, size: 16, color: MUTED }),
-                    ],
-                    border: { top: { style: BorderStyle.SINGLE, size: 4, color: "E2E8F0" } },
-                    spacing: { before: 100 },
-                  }),
-                ],
-              }),
-            },
-            children: [
-              // ── Cover ─────────────────────────────────────────────────────
-              new Paragraph({
-                children: [new TextRun({ text: "GridGuard", bold: true, size: 72, color: CYAN })],
-                alignment: AlignmentType.CENTER,
-                spacing: { before: 600, after: 200 },
-              }),
-              new Paragraph({
-                children: [new TextRun({ text: "Fault Analysis Report", size: 40, color: DARK })],
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 200 },
-              }),
-              new Paragraph({
-                children: [new TextRun({ text: timestamp, size: 22, color: MUTED })],
-                alignment: AlignmentType.CENTER,
-                spacing: { after: 600 },
-              }),
+      // Logo / Brand
+      doc.setFontSize(48);
+      doc.setFont("helvetica", "bold");
+      setColor(C.cyan);
+      doc.text("GridGuard", W / 2, 100, { align: "center" });
 
-              // ── 1. Summary ────────────────────────────────────────────────
-              heading("1. Executive Summary"),
-              kv("Grid Health Score", `${health} / 100`, health >= 70 ? GREEN : health >= 40 ? AMBER : RED),
-              kv("Fault Risk",        `${risk.toFixed(0)}%`, riskLevel.color?.replace("#","") || RED),
-              kv("Risk Level",        riskLevel.label),
-              kv("Fault Type",        scenario.faultType || "NONE", FAULT_COLOR),
-              kv("Affected Phase",    scenario.affectedPhase || "None", AMBER),
-              kv("Severity",          scenario.severity || "Normal"),
-              kv("Fault Location",    scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% of line (SIMULATED)` : "N/A"),
-              spacer(),
+      doc.setFontSize(20);
+      doc.setFont("helvetica", "normal");
+      setColor(C.white);
+      doc.text("Fault Analysis Report", W / 2, 118, { align: "center" });
 
-              // ── 2. Input Parameters ───────────────────────────────────────
-              heading("2. Input Parameters"),
-              makeTable(
-                ["Parameter", "Phase A", "Phase B", "Phase C"],
-                [
-                  ["Voltage (V)", scenario.Va, scenario.Vb, scenario.Vc],
-                  ["Current (A)", scenario.Ia, scenario.Ib, scenario.Ic],
-                  ["Frequency (Hz)", scenario.frequency, "—", "—"],
-                  ["Power Factor", scenario.powerFactor, "—", "—"],
-                  ["V-Unbalance (%)", scenario.voltageUnbalance ?? "—", "—", "—"],
-                  ["I-Unbalance (%)", scenario.currentUnbalance ?? "—", "—", "—"],
-                ]
-              ),
-              spacer(),
+      doc.setFontSize(11);
+      setColor(C.muted);
+      doc.text(timestamp, W / 2, 132, { align: "center" });
 
-              // ── 3. Fault Analysis ─────────────────────────────────────────
-              heading("3. Fault Analysis"),
-              makeTable(
-                ["Property", "Value"],
-                [
-                  ["Fault Type",     scenario.faultType || "NONE"],
-                  ["Affected Phase", scenario.affectedPhase || "None"],
-                  ["Severity",       scenario.severity || "Normal"],
-                  ["Fault Location", scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% (SIMULATED)` : "N/A"],
-                  ["Confidence",     scenario.confidence != null ? `${(scenario.confidence * 100).toFixed(1)}%` : "N/A"],
-                ]
-              ),
-              spacer(),
+      // Badge
+      setFill(C.amber);
+      doc.roundedRect(W / 2 - 28, 142, 56, 10, 2, 2, "F");
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      setColor(C.dark);
+      doc.text("🧪 SIMULATION MODE", W / 2, 148.5, { align: "center" });
 
-              // ── 4. Grid Health ────────────────────────────────────────────
-              heading("4. Grid Health Assessment"),
-              makeTable(
-                ["Metric", "Value"],
-                [
-                  ["Grid Health Score", `${health} / 100`],
-                  ["Fault Risk",        `${risk.toFixed(1)}%`],
-                  ["Risk Level",        riskLevel.label],
-                  ["Active Power (kW)", scenario.activePower != null ? `${scenario.activePower.toFixed(1)} kW` : "—"],
-                  ["Reactive Power (kVAR)", scenario.reactivePower != null ? `${scenario.reactivePower.toFixed(1)} kVAR` : "—"],
-                  ["Power Factor",      scenario.powerFactor ?? "—"],
-                ]
-              ),
-              spacer(),
-
-              // ── 5. XAI ────────────────────────────────────────────────────
-              ...xaiRows,
-
-              // ── 6. AI Diagnosis ───────────────────────────────────────────
-              ...diagRows,
-
-              // ── Disclaimer ────────────────────────────────────────────────
-              heading("Disclaimer", HeadingLevel.HEADING_2),
-              body(
-                "This report was generated by GridGuard v2.0 in SIMULATION MODE. " +
-                "All parameter values and fault assessments are simulated and do NOT " +
-                "represent actual grid measurements. GridGuard's diagnosis and " +
-                "recommendations are decision support only and do not replace utility " +
-                "protection engineering review or applicable safety/regulatory requirements."
-              ),
-            ],
-          },
-        ],
+      // Stats row
+      const stats = [
+        { label: "Grid Health", value: `${health}/100`, color: health >= 70 ? C.green : health >= 40 ? C.amber : C.red },
+        { label: "Fault Risk",  value: `${risk.toFixed(0)}%`,  color: hasFault ? C.red : C.green },
+        { label: "Fault Type",  value: scenario.faultType || "NONE", color: faultColor },
+      ];
+      stats.forEach((s, i) => {
+        const bx = MARGIN + i * (CONTENT_W / 3);
+        setFill([255,255,255,0.05]);
+        doc.setAlpha ? null : null;
+        setFill([30, 40, 60]);
+        doc.roundedRect(bx, 165, CONTENT_W / 3 - 4, 22, 3, 3, "F");
+        doc.setFontSize(16);
+        doc.setFont("helvetica", "bold");
+        setColor(s.color);
+        doc.text(s.value, bx + (CONTENT_W / 3 - 4) / 2, 177, { align: "center" });
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        setColor(C.muted);
+        doc.text(s.label, bx + (CONTENT_W / 3 - 4) / 2, 183, { align: "center" });
       });
 
-      // Use toBuffer + explicit MIME type so desktop Windows browsers
-      // correctly identify the file as a Word document (.docx).
-      const buffer = await Packer.toBuffer(doc);
-      const blob = new Blob([buffer], {
-        type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
-      const fileName = `GridGuard_Report_${Date.now()}.docx`;
-      // file-saver with explicit blob
-      try {
-        saveAs(blob, fileName);
-      } catch (_) {
-        // Fallback: manual anchor download (works on all desktop browsers)
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+      addPageFooter();
+
+      // ── Page 2+ ─────────────────────────────────────────────────────────────
+      doc.addPage();
+      y = MARGIN + 5;
+      addPageHeader();
+
+      // Section heading helper
+      const sectionHeading = (text) => {
+        needPage(16);
+        doc.setFontSize(13);
+        doc.setFont("helvetica", "bold");
+        setColor(C.dark);
+        doc.text(text, MARGIN, y);
+        setDraw(C.cyan);
+        doc.setLineWidth(0.7);
+        doc.line(MARGIN, y + 1.5, W - MARGIN, y + 1.5);
+        doc.setLineWidth(0.2);
+        y += 10;
+      };
+
+      // Key-value row helper
+      const kvRow = (label, value, valueRgb = C.ink) => {
+        needPage(8);
+        doc.setFontSize(9.5);
+        doc.setFont("helvetica", "bold");
+        setColor(C.muted);
+        doc.text(label + ":", MARGIN, y);
+        doc.setFont("helvetica", "normal");
+        setColor(valueRgb);
+        doc.text(String(value), MARGIN + 52, y);
+        y += 7;
+      };
+
+      // Table helper
+      const drawTable = (headers, rows) => {
+        needPage(12 + rows.length * 8);
+        const colW = CONTENT_W / headers.length;
+        // Header row
+        setFill(C.dark);
+        doc.rect(MARGIN, y, CONTENT_W, 9, "F");
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "bold");
+        setColor(C.white);
+        headers.forEach((h, i) => doc.text(h, MARGIN + i * colW + colW / 2, y + 6, { align: "center" }));
+        y += 9;
+        // Data rows
+        rows.forEach((row, ri) => {
+          needPage(8);
+          setFill(ri % 2 === 0 ? C.light : C.white);
+          doc.rect(MARGIN, y, CONTENT_W, 8, "F");
+          setDraw(C.border);
+          doc.rect(MARGIN, y, CONTENT_W, 8, "S");
+          doc.setFont("helvetica", "normal");
+          setColor(C.ink);
+          row.forEach((cell, ci) => doc.text(String(cell ?? "—"), MARGIN + ci * colW + colW / 2, y + 5.5, { align: "center" }));
+          y += 8;
+        });
+        y += 5;
+      };
+
+      // ── 1. Executive Summary ───────────────────────────────────────────────
+      sectionHeading("1. Executive Summary");
+      kvRow("Grid Health Score", `${health} / 100`, health >= 70 ? C.green : health >= 40 ? C.amber : C.red);
+      kvRow("Fault Risk",        `${risk.toFixed(0)}%`, hasFault ? C.red : C.green);
+      kvRow("Risk Level",        riskLevel.label);
+      kvRow("Fault Type",        scenario.faultType || "NONE", faultColor);
+      kvRow("Affected Phase",    scenario.affectedPhase || "None", C.amber);
+      kvRow("Severity",          scenario.severity || "Normal");
+      kvRow("Fault Location",    scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% of line (SIMULATED)` : "N/A");
+      y += 3;
+
+      // ── 2. Input Parameters ───────────────────────────────────────────────
+      sectionHeading("2. Input Parameters");
+      drawTable(
+        ["Parameter", "Phase A", "Phase B", "Phase C"],
+        [
+          ["Voltage (V)",      scenario.Va,          scenario.Vb,  scenario.Vc],
+          ["Current (A)",      scenario.Ia,          scenario.Ib,  scenario.Ic],
+          ["Frequency (Hz)",   scenario.frequency,   "—",          "—"],
+          ["Power Factor",     scenario.powerFactor, "—",          "—"],
+          ["V-Unbalance (%)",  scenario.voltageUnbalance ?? "—", "—", "—"],
+          ["I-Unbalance (%)",  scenario.currentUnbalance  ?? "—", "—", "—"],
+        ]
+      );
+
+      // ── 3. Fault Analysis ─────────────────────────────────────────────────
+      sectionHeading("3. Fault Analysis");
+      drawTable(
+        ["Property", "Value"],
+        [
+          ["Fault Type",     scenario.faultType || "NONE"],
+          ["Affected Phase", scenario.affectedPhase || "None"],
+          ["Severity",       scenario.severity || "Normal"],
+          ["Fault Location", scenario.faultLocation != null ? `${scenario.faultLocation.toFixed(1)}% (SIMULATED)` : "N/A"],
+          ["Confidence",     scenario.confidence != null ? `${(scenario.confidence * 100).toFixed(1)}%` : "N/A"],
+        ]
+      );
+
+      // ── 4. Grid Health Assessment ─────────────────────────────────────────
+      sectionHeading("4. Grid Health Assessment");
+      drawTable(
+        ["Metric", "Value"],
+        [
+          ["Grid Health Score",    `${health} / 100`],
+          ["Fault Risk",           `${risk.toFixed(1)}%`],
+          ["Risk Level",           riskLevel.label],
+          ["Active Power (kW)",    scenario.activePower    != null ? `${scenario.activePower.toFixed(1)} kW`    : "—"],
+          ["Reactive Power (kVAR)",scenario.reactivePower  != null ? `${scenario.reactivePower.toFixed(1)} kVAR` : "—"],
+          ["Power Factor",         scenario.powerFactor ?? "—"],
+        ]
+      );
+
+      // ── 5. AI Explanation (XAI) ───────────────────────────────────────────
+      if (includeXAI) {
+        sectionHeading("5. AI Explanation (XAI)");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        setColor(C.ink);
+        doc.text("The following factors influenced the fault risk assessment:", MARGIN, y);
+        y += 8;
+        xaiFacts.forEach((f) => {
+          needPage(10);
+          const impactColor = f.impact === "Critical" ? C.red : f.impact === "High" ? [255, 140, 66] : f.impact === "Medium" ? C.amber : C.green;
+          doc.setFont("helvetica", "bold"); setColor(C.ink);
+          doc.text(`● ${f.name}`, MARGIN, y);
+          const nameW = doc.getTextWidth(`● ${f.name}`) + 3;
+          doc.setFont("helvetica", "bold"); setColor(impactColor);
+          doc.text(`[${f.impact}]`, MARGIN + nameW, y);
+          const impW = doc.getTextWidth(`[${f.impact}]`) + 3;
+          doc.setFont("helvetica", "normal"); setColor(C.muted);
+          const rest = `${f.direction} ${f.value} — ${f.description}`;
+          const lines = doc.splitTextToSize(rest, CONTENT_W - nameW - impW - 5);
+          doc.text(lines, MARGIN + nameW + impW, y);
+          y += Math.max(7, lines.length * 5);
+        });
+        y += 3;
       }
+
+      // ── 6. AI Diagnosis (Backend) ─────────────────────────────────────────
+      if (lastDiagnosis) {
+        sectionHeading("6. AI Diagnosis (Backend)");
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        setColor(C.ink);
+        const diagText = lastDiagnosis.diagnosis || "No diagnosis text available.";
+        const diagLines = doc.splitTextToSize(diagText, CONTENT_W);
+        diagLines.forEach((line) => { needPage(7); doc.text(line, MARGIN, y); y += 6; });
+        y += 3;
+      }
+
+      // ── Disclaimer ────────────────────────────────────────────────────────
+      sectionHeading("Disclaimer");
+      doc.setFontSize(8.5);
+      doc.setFont("helvetica", "normal");
+      setColor(C.muted);
+      const disclaimer =
+        "This report was generated by GridGuard v2.0 in SIMULATION MODE. " +
+        "All parameter values and fault assessments are simulated and do NOT " +
+        "represent actual grid measurements. GridGuard's diagnosis and " +
+        "recommendations are decision support only and do not replace utility " +
+        "protection engineering review or applicable safety/regulatory requirements.";
+      const discLines = doc.splitTextToSize(disclaimer, CONTENT_W);
+      discLines.forEach((line) => { needPage(7); doc.text(line, MARGIN, y); y += 6; });
+
+      // Add footer to every content page
+      const totalPages = doc.getNumberOfPages();
+      for (let p = 2; p <= totalPages; p++) {
+        doc.setPage(p);
+        addPageFooter();
+      }
+
+      // ── Save ──────────────────────────────────────────────────────────────
+      doc.save(`GridGuard_Report_${Date.now()}.pdf`);
       setReportGenerated(true);
     } catch (e) {
-      console.error("Word export error:", e);
-      alert("Word export failed: " + e.message);
+      console.error("PDF export error:", e);
+      alert("PDF export failed: " + e.message);
     } finally {
       setGenerating(false);
       setGenType(null);
@@ -421,14 +398,14 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
           <h2 className="font-display font-semibold text-xl">Engineering Report</h2>
           <p className="text-xs text-ink-muted mt-1">Generate and download a professional fault analysis report</p>
         </div>
-        {/* Primary CTA — Word */}
+        {/* Primary CTA — PDF */}
         <button
           className="btn-primary"
-          onClick={downloadWord}
+          onClick={downloadPDFReport}
           disabled={generating}
           id="generate-report-btn"
         >
-          {generating && genType === "word" ? "⏳ Generating…" : "📝 Download Word Report"}
+          {generating && genType === "pdf" ? "⏳ Generating…" : "📄 Download PDF Report"}
         </button>
       </div>
 
@@ -552,15 +529,15 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
               <p className="eyebrow mb-3">Export Formats</p>
               <div className="flex flex-col gap-2">
 
-                {/* Word — primary */}
+                {/* PDF — primary */}
                 <button
                   className="btn-primary flex items-center gap-2 justify-center"
-                  onClick={downloadWord}
+                  onClick={downloadPDFReport}
                   disabled={generating}
-                  id="download-word-btn"
+                  id="download-pdf-report-btn"
                 >
-                  <span>📝</span>
-                  <span>{generating && genType === "word" ? "Generating Word…" : "Download Word (.docx)"}</span>
+                  <span>📄</span>
+                  <span>{generating && genType === "pdf" ? "Generating PDF…" : "Download PDF (.pdf)"}</span>
                 </button>
 
                 {/* Markdown */}
@@ -589,7 +566,7 @@ export default function Reports({ scenario, lastClassification, lastDiagnosis })
               </div>
 
               <p className="text-[10px] font-mono text-ink-faint mt-3">
-                Word & Markdown export work offline. PDF requires backend connection.
+                PDF &amp; Markdown export work offline. Backend PDF requires connection.
               </p>
             </div>
           </div>
