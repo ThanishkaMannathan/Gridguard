@@ -12,8 +12,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
-GENERATION_MODEL = "nvidia/nemotron-3-super-120b-a12b"
-EMBEDDING_MODEL = "nvidia/nemotron-3-embed-1b"
+# nemotron-3-super-120b-a12b reached EOL on 2026-10-03; replaced with lightning variant.
+GENERATION_MODEL = "nvidia/nemotron-3.5-lightning-30b-a3b"
+EMBEDDING_MODEL = "nvidia/nv-embedqa-e5-v5"
 
 _client = None
 
@@ -49,7 +50,7 @@ def embed_texts(texts, input_type="passage"):
 
 def chat_complete(messages, temperature=0.2, max_tokens=350):
     """
-    Call the NVIDIA-hosted Llama 3.1 70B instruct model for generation.
+    Call the NVIDIA-hosted Nemotron 3.5 Lightning 30B model for generation.
     `messages` follows the standard OpenAI chat format:
       [{"role": "system"/"user"/"assistant", "content": "..."}]
     Returns the assistant's text response.
